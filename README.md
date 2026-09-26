@@ -35,8 +35,15 @@ Swagger: http://localhost:8000/docs
 
 ## Запуск планировщика (парсинг + уведомления)
 
+Локально/в Docker — постоянный процесс с APScheduler:
 ```bash
-poetry run python -m parser.scheduler
+python -m parser.scheduler
+```
+
+На Render (free plan не поддерживает background worker) — вместо этого используется
+Cron Job, который просто разово запускает синк и завершается:
+```bash
+python -m parser.run_once
 ```
 
 ## Структура
@@ -77,7 +84,7 @@ docker compose up --build
 ## Деплой на Render
 
 1. Запушь проект на GitHub (`git init`, `git add .`, `git commit`, создать репо на GitHub, `git push`)
-2. На https://dashboard.render.com → **New** → **Blueprint** → выбери репозиторий — Render сам найдёт `render.yaml` и покажет план (Postgres + `aggregator-api` + `aggregator-worker`)
+2. На https://dashboard.render.com → **New** → **Blueprint** → выбери репозиторий — Render сам найдёт `render.yaml` и покажет план (Postgres + `aggregator-api` + `aggregator-sync` Cron Job — background worker недоступен на free-плане, поэтому синк идёт через Cron Job вместо постоянного процесса)
 3. Перед деплоем Render попросит заполнить переменные с `sync: false` (они специально не хранятся в `render.yaml`, т.к. это секреты): `FREELANCEHUNT_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
 4. Apply — Render сам создаст базу, соберёт Docker-образ для обоих сервисов и подставит `DATABASE_URL` из своей БД автоматически
 5. `aggregator-api` при каждом деплое сам прогоняет `alembic upgrade head` перед стартом (см. `dockerCommand` в `render.yaml`) — миграции гонять руками не нужно

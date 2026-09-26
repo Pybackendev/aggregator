@@ -29,12 +29,13 @@ services:
       - key: SYNC_INTERVAL_MINUTES
         value: "15"
 
-  - type: worker
-    name: aggregator-worker
+  - type: cron
+    name: aggregator-sync
     runtime: docker
     dockerfilePath: ./Dockerfile
     plan: free
-    dockerCommand: python -m parser.scheduler
+    schedule: "*/15 * * * *"  # every 15 minutes; free plan cron has a practical floor around this
+    dockerCommand: python -m parser.run_once
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -48,5 +49,3 @@ services:
         sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
-      - key: SYNC_INTERVAL_MINUTES
-        value: "15"
