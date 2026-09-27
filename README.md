@@ -98,6 +98,26 @@ docker compose up --build
 
 Бесплатный план Render "усыпляет" веб-сервис после 15 минут без запросов (первый запрос после сна будет медленным) — это нормально для портфолио-демо, но не для продакшена.
 
+## Frontend (React + Vite)
+
+Простая панель: список проектов с Freelancehunt + управление своими фильтрами.
+
+```bash
+cd frontend
+npm install
+cp .env.example .env   # укажи VITE_API_URL = адрес твоего Render-сервиса
+npm run dev
+```
+
+Открой http://localhost:5173
+
+### Деплой фронта (бесплатно — Vercel)
+
+1. https://vercel.com → **New Project** → выбери репозиторий
+2. **Root Directory**: `frontend`
+3. Environment Variables: `VITE_API_URL` = `https://aggregator-api.onrender.com`
+4. Deploy — получишь публичный `.vercel.app` адрес
+
 ## Дальше по плану
 
 1. Сверить структуру ответа API, поправить модели
