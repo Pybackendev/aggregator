@@ -1,0 +1,16 @@
+name: Trigger Freelancehunt sync
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"  # every 15 minutes (GitHub may delay this under load)
+  workflow_dispatch: {}  # allows manual "Run workflow" from the Actions tab
+
+jobs:
+  trigger:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Call /internal/sync
+        run: |
+          curl -X POST "${{ secrets.RENDER_API_URL }}/internal/sync" \
+            -H "X-Sync-Token: ${{ secrets.SYNC_TRIGGER_TOKEN }}" \
+            --fail

@@ -40,11 +40,17 @@ Swagger: http://localhost:8000/docs
 python -m parser.scheduler
 ```
 
-На Render (free plan не поддерживает background worker) — вместо этого используется
-Cron Job, который просто разово запускает синк и завершается:
-```bash
-python -m parser.run_once
-```
+**На Render (free plan)** — background worker и cron job там платные (от $1/мес),
+поэтому вместо них используется эндпоинт `POST /internal/sync` (защищён секретным
+заголовком `X-Sync-Token`), который дёргает бесплатный GitHub Actions по расписанию
+(`.github/workflows/sync.yml`, каждые ~15 минут).
+
+Нужно в репозитории на GitHub → Settings → Secrets and variables → Actions добавить:
+- `RENDER_API_URL` — например `https://aggregator-api.onrender.com`
+- `SYNC_TRIGGER_TOKEN` — любая случайная строка, та же, что в переменной
+  `SYNC_TRIGGER_TOKEN` на Render
+
+Проверить вручную: вкладка **Actions** в репо → workflow "Trigger Freelancehunt sync" → **Run workflow**.
 
 ## Структура
 
@@ -84,8 +90,8 @@ docker compose up --build
 ## Деплой на Render
 
 1. Запушь проект на GitHub (`git init`, `git add .`, `git commit`, создать репо на GitHub, `git push`)
-2. На https://dashboard.render.com → **New** → **Blueprint** → выбери репозиторий — Render сам найдёт `render.yaml` и покажет план (Postgres + `aggregator-api` + `aggregator-sync` Cron Job — background worker недоступен на free-плане, поэтому синк идёт через Cron Job вместо постоянного процесса)
-3. Перед деплоем Render попросит заполнить переменные с `sync: false` (они специально не хранятся в `render.yaml`, т.к. это секреты): `FREELANCEHUNT_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`
+2. На https://dashboard.render.com → **New** → **Blueprint** → выбери репозиторий — Render сам найдёт `render.yaml` и покажет план (Postgres + `aggregator-api`, оба на free)
+3. Перед деплоем Render попросит заполнить переменные с `sync: false`: `FREELANCEHUNT_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SYNC_TRIGGER_TOKEN` (последний — придумай случайную строку сам, это пароль для запуска синка)
 4. Apply — Render сам создаст базу, соберёт Docker-образ для обоих сервисов и подставит `DATABASE_URL` из своей БД автоматически
 5. `aggregator-api` при каждом деплое сам прогоняет `alembic upgrade head` перед стартом (см. `dockerCommand` в `render.yaml`) — миграции гонять руками не нужно
 6. Проверка: открой `https://<твой-сервис>.onrender.com/docs`

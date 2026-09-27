@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     telegram_bot_token: str = ""
     telegram_chat_id: str = ""
     sync_interval_minutes: int = 15
+    sync_trigger_token: str = ""  # shared secret for POST /internal/sync on free plan
 
     def model_post_init(self, __context) -> None:
         # Render (and some other providers) hand out a plain postgresql:// URL;
