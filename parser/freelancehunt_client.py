@@ -44,11 +44,24 @@ class FreelancehuntClient:
         return resp.json()
 
     async def iter_all_projects(self, skill_ids: list[int] | None = None, max_pages: int = 20):
-        """Yield raw project dicts across pages until there's no `next` link or max_pages hit."""
+        """Yield raw project dicts across pages until there's no `next` link or max_pages hit.
+
+        NOTE: Freelancehunt's `filter[skill_ids]` query param does not reliably filter
+        server-side (confirmed empirically — unrelated projects come back regardless).
+        So we still pass it (harmless, might help under the hood) but ALSO filter
+        client-side below, checking each project's own attributes.skills list.
+        """
         page = 1
+        wanted = set(skill_ids or [])
         while page <= max_pages:
             payload = await self.get_projects_page(page=page, skill_ids=skill_ids)
             for item in payload["data"]:
+                if wanted:
+                    item_skill_ids = {
+                        s["id"] for s in (item.get("attributes", {}).get("skills") or [])
+                    }
+                    if not (item_skill_ids & wanted):
+                        continue
                 yield item
             if not payload.get("links", {}).get("next"):
                 break
