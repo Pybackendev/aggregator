@@ -74,8 +74,10 @@ export default function App() {
 
   return (
     <div className="container">
-      <h1>Freelance Job Aggregator</h1>
-      <p className="subtitle">Проекты с Freelancehunt по Python и разработке ботов</p>
+      <header className="app-header">
+        <h1>Freelance Job Aggregator</h1>
+        <p className="subtitle">Проекты с Freelancehunt по Python и разработке ботов</p>
+      </header>
 
       <div className="tabs">
         <button className={`tab ${tab === "jobs" ? "active" : ""}`} onClick={() => setTab("jobs")}>

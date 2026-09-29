@@ -9,22 +9,24 @@ export default function JobList({ jobs }) {
         <div className="card" key={job.id}>
           <h3>{job.title}</h3>
           <div className="meta">
-            {job.budget_amount
-              ? `${job.budget_amount} ${job.budget_currency || ""}`
-              : "бюджет не указан"}
-            {job.status_name ? ` · ${job.status_name}` : ""}
-          </div>
-          {job.skills?.map((s) => (
-            <span className="badge" key={s.id}>
-              {s.name}
+            <span className="budget">
+              {job.budget_amount
+                ? `${job.budget_amount} ${job.budget_currency || ""}`
+                : "бюджет не указан"}
             </span>
-          ))}
+            {job.status_name ? <span>· {job.status_name}</span> : null}
+          </div>
+          <div>
+            {job.skills?.map((s) => (
+              <span className="badge" key={s.id}>
+                {s.name}
+              </span>
+            ))}
+          </div>
           {job.url && (
-            <div style={{ marginTop: 8 }}>
-              <a href={job.url} target="_blank" rel="noreferrer">
-                Открыть на Freelancehunt →
-              </a>
-            </div>
+            <a className="job-link" href={job.url} target="_blank" rel="noreferrer">
+              Открыть на Freelancehunt →
+            </a>
           )}
         </div>
       ))}

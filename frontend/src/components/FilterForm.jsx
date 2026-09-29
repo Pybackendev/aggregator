@@ -28,14 +28,16 @@ export default function FilterForm({ filters, onAdd, onDelete }) {
           value={minBudget}
           onChange={(e) => setMinBudget(e.target.value)}
         />
-        <button type="submit">Добавить фильтр</button>
+        <button type="submit">+ Добавить</button>
       </form>
 
+      <div className="section-title">Активные фильтры</div>
+
       {filters.length === 0 ? (
-        <div className="empty">Фильтров пока нет.</div>
+        <div className="empty">Фильтров пока нет — добавь первый выше.</div>
       ) : (
         filters.map((f) => (
-          <div className="card" key={f.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="card filter-row" key={f.id}>
             <div>
               {f.keyword && <span className="badge">слово: {f.keyword}</span>}
               {f.min_budget != null && <span className="badge">от {f.min_budget}</span>}
