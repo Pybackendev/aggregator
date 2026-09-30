@@ -1,4 +1,4 @@
-export default function Toolbar({ search, onSearchChange, sort, onSortChange, count }) {
+export default function Toolbar({ search, onSearchChange, sort, onSortChange, count, todayCount }) {
   return (
     <div className="toolbar">
       <input
@@ -11,7 +11,10 @@ export default function Toolbar({ search, onSearchChange, sort, onSortChange, co
         <option value="newest">Сначала новые</option>
         <option value="budget">По бюджету</option>
       </select>
-      <div className="count-pill">Найдено: {count}</div>
+      <div className="count-pill">
+        Найдено: {count}
+        {todayCount > 0 && <span className="trend-up"> ↑ +{todayCount} сегодня</span>}
+      </div>
     </div>
   );
 }
