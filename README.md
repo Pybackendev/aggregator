@@ -4,7 +4,7 @@
 
 **[Открыть демо](https://aggregator-wk8a.vercel.app/)**
 
-![Список заказов в демо](docs/aggregator-jobs.jpg)
+![Список заказов в демо](aggregator-jobs.jpg)
 
 **Python · FastAPI · PostgreSQL · SQLAlchemy · Alembic · React · Docker · pytest**
 
