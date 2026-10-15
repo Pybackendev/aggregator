@@ -1,126 +1,126 @@
 # Freelance Job Aggregator
 
-Парсит проекты с Freelancehunt по заданным навыкам (Python=22, Bot Development=180),
-сохраняет в Postgres, отдаёт через FastAPI, шлёт уведомления в Telegram.
+Сервис собирает проекты с Freelancehunt, сохраняет их в PostgreSQL и помогает находить подходящие заказы. В React-панели можно просматривать проекты и управлять фильтрами; backend сопоставляет новые заказы с сохранёнными условиями и отправляет уведомления в Telegram.
 
-## Важно перед первым запуском
+**[Открыть демо](https://aggregator-wk8a.vercel.app/)**
 
-Модели (`app/models/job.py`) и парсер (`parser/sync.py`) написаны по документации
-Freelancehunt API "вслепую" — реальный ответ `GET /v2/projects` ещё не проверен.
-**Первым делом** сделай live-запрос и сверь, что поля `attributes.budget`,
-`attributes.status`, `attributes.employer`, `attributes.skills`, `attributes.published_at`
-называются именно так — и поправь `parser/sync.py` / `app/models/job.py`, если нет.
+![Список заказов в демо](docs/aggregator-jobs.jpg)
 
-## Установка
+**Python · FastAPI · PostgreSQL · SQLAlchemy · Alembic · React · Docker · pytest**
+
+## Возможности
+
+- Получение проектов через Freelancehunt API с фильтрацией по навыкам.
+- Обновление проектов без дублирования по ID источника.
+- API списка заказов, фильтрации по навыку и постраничной выдачи.
+- Сохранённые пользовательские фильтры по ключевому слову и минимальному бюджету.
+- Сопоставление новых проектов с фильтрами и Telegram-уведомления.
+- React-панель со списком заказов, избранным и настройками фильтров.
+- Миграции базы, Docker Compose, автоматические проверки в GitHub Actions.
+
+## Архитектура
+
+```text
+Freelancehunt API → синхронизация → PostgreSQL → FastAPI → React
+                         ↓
+                фильтры → Telegram
+```
+
+## Быстрый старт с Docker
 
 ```bash
-poetry install
-cp .env.example .env   # заполнить токены и DATABASE_URL
+git clone https://github.com/Pybackendev/aggregator.git
+cd aggregator
 ```
 
-## Миграции
-
-```bash
-poetry run alembic revision --autogenerate -m "init"
-poetry run alembic upgrade head
-```
-
-## Запуск API
-
-```bash
-poetry run uvicorn app.main:app --reload
-```
-
-Swagger: http://localhost:8000/docs
-
-## Запуск планировщика (парсинг + уведомления)
-
-Локально/в Docker — постоянный процесс с APScheduler:
-```bash
-python -m parser.scheduler
-```
-
-**На Render (free plan)** — background worker и cron job там платные (от $1/мес),
-поэтому вместо них используется эндпоинт `POST /internal/sync` (защищён секретным
-заголовком `X-Sync-Token`), который дёргает бесплатный GitHub Actions по расписанию
-(`.github/workflows/sync.yml`, каждые ~15 минут).
-
-Нужно в репозитории на GitHub → Settings → Secrets and variables → Actions добавить:
-- `RENDER_API_URL` — например `https://aggregator-api.onrender.com`
-- `SYNC_TRIGGER_TOKEN` — любая случайная строка, та же, что в переменной
-  `SYNC_TRIGGER_TOKEN` на Render
-
-Проверить вручную: вкладка **Actions** в репо → workflow "Trigger Freelancehunt sync" → **Run workflow**.
-
-## Структура
-
-```
-app/
-  api/           # FastAPI роутеры
-  core/          # конфиг, подключение к БД
-  models/        # SQLAlchemy модели
-  schemas/       # Pydantic схемы ответов API
-  services/       # (для бизнес-логики по мере роста)
-  repositories/   # (для доступа к БД по мере роста)
-parser/
-  freelancehunt_client.py  # httpx-клиент к Freelancehunt API
-  sync.py                  # upsert + дедупликация проектов
-  notifier.py              # отправка сообщений в Telegram
-  scheduler.py             # APScheduler: периодический запуск sync
-alembic/          # миграции БД
-```
-
-## Запуск через Docker (рекомендуется)
-
-Не нужен ни Poetry, ни venv, ни отдельно поднятый Postgres — всё в одной команде:
+Скопируйте `.env.example` в `.env`. Заполните `FREELANCEHUNT_TOKEN`; для уведомлений — `TELEGRAM_BOT_TOKEN` и `TELEGRAM_CHAT_ID`.
 
 ```bash
 docker compose up --build
 ```
 
-Это поднимет:
-- `db` — Postgres 16 (локальный, для разработки; на проде используется Neon/Render Postgres)
-- `api` — сначала прогонит `alembic upgrade head`, потом запустит FastAPI на http://localhost:8000/docs
-- `worker` — запустит `parser.scheduler` (парсинг + уведомления по расписанию)
+Compose запускает PostgreSQL 16, API и планировщик. Контейнер API применяет существующие миграции перед запуском. База хранится в volume `db_data`; подключение к локальной БД внутри контейнеров задаётся в Compose.
 
-`DATABASE_URL` для контейнеров переопределяется автоматически на локальный `db` сервис — значение в `.env` (Neon) для Docker-запуска не используется, но нужно для `FREELANCEHUNT_TOKEN` и `TELEGRAM_*`.
+API-документация: http://localhost:8000/docs. Остановка: `docker compose down`.
 
-Остановить: `docker compose down` (данные Postgres останутся в volume `db_data`, чтобы стереть — `docker compose down -v`).
-
-## Деплой на Render
-
-1. Запушь проект на GitHub (`git init`, `git add .`, `git commit`, создать репо на GitHub, `git push`)
-2. На https://dashboard.render.com → **New** → **Blueprint** → выбери репозиторий — Render сам найдёт `render.yaml` и покажет план (Postgres + `aggregator-api`, оба на free)
-3. Перед деплоем Render попросит заполнить переменные с `sync: false`: `FREELANCEHUNT_TOKEN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `SYNC_TRIGGER_TOKEN` (последний — придумай случайную строку сам, это пароль для запуска синка)
-4. Apply — Render сам создаст базу, соберёт Docker-образ для обоих сервисов и подставит `DATABASE_URL` из своей БД автоматически
-5. `aggregator-api` при каждом деплое сам прогоняет `alembic upgrade head` перед стартом (см. `dockerCommand` в `render.yaml`) — миграции гонять руками не нужно
-6. Проверка: открой `https://<твой-сервис>.onrender.com/docs`
-
-Бесплатный план Render "усыпляет" веб-сервис после 15 минут без запросов (первый запрос после сна будет медленным) — это нормально для портфолио-демо, но не для продакшена.
-
-## Frontend (React + Vite)
-
-Простая панель: список проектов с Freelancehunt + управление своими фильтрами.
+## Frontend
 
 ```bash
 cd frontend
 npm install
-cp .env.example .env   # укажи VITE_API_URL = адрес твоего Render-сервиса
+```
+
+Скопируйте `.env.example` в `.env`, задайте `VITE_API_URL=http://localhost:8000`.
+
+```bash
 npm run dev
 ```
 
-Открой http://localhost:5173
+Панель: http://localhost:5173. Сборка: `npm run build`.
 
-### Деплой фронта (бесплатно — Vercel)
+## Локальный backend без Docker
 
-1. https://vercel.com → **New Project** → выбери репозиторий
-2. **Root Directory**: `frontend`
-3. Environment Variables: `VITE_API_URL` = `https://aggregator-api.onrender.com`
-4. Deploy — получишь публичный `.vercel.app` адрес
+Нужны Python 3.11+, Poetry и PostgreSQL.
 
-## Дальше по плану
+```bash
+poetry install
+```
 
-1. Сверить структуру ответа API, поправить модели
-2. Прогнать первую миграцию, проверить `/jobs` в Swagger
-3. Добавить `job_filters` + matching-логику под конкретных пользователей
-4. React-панель поверх готового API
+Заполните `.env`, указав строку подключения `DATABASE_URL`.
+
+```bash
+poetry run alembic upgrade head
+poetry run uvicorn app.main:app --reload
+```
+
+В другом терминале:
+
+```bash
+poetry run python -m parser.scheduler
+```
+
+Создавать новую начальную миграцию для запуска не нужно: существующие миграции находятся в `alembic/versions/`.
+
+## Настройки
+
+| Переменная | Назначение |
+| --- | --- |
+| `DATABASE_URL` | Подключение PostgreSQL с драйвером asyncpg |
+| `FREELANCEHUNT_TOKEN` | Токен Freelancehunt API |
+| `FREELANCEHUNT_SKILL_IDS` | ID навыков; по умолчанию `22,180` |
+| `TELEGRAM_BOT_TOKEN` | Токен бота уведомлений |
+| `TELEGRAM_CHAT_ID` | Чат общих уведомлений |
+| `SYNC_INTERVAL_MINUTES` | Интервал планировщика; по умолчанию `15` |
+| `SYNC_TRIGGER_TOKEN` | Секрет для внешнего запуска синхронизации |
+| `VITE_API_URL` | Адрес backend; задаётся отдельно во frontend |
+
+Альтернативный запуск синхронизации: `POST /internal/sync` с заголовком `X-Sync-Token`. Workflow `.github/workflows/sync.yml` использует секреты GitHub `RENDER_API_URL` и `SYNC_TRIGGER_TOKEN`. Внешний триггер можно использовать вместо постоянно работающего планировщика.
+
+## Проверки
+
+```bash
+poetry run pytest
+```
+
+Тесты охватывают API-клиент, сохранение проектов и сопоставление фильтров. Проверка живой интеграции выполняется отдельно: нужны действующий токен источника, запущенный backend и проверка полученных заказов и уведомлений. Для публичной панели также требуется доступный backend и корректная настройка CORS.
+
+## Структура
+
+```text
+app/api/          # HTTP-маршруты
+app/core/         # настройки и БД
+app/models/       # SQLAlchemy-модели
+app/schemas/      # схемы API
+app/services/     # сопоставление фильтров
+parser/           # API-клиент, sync, уведомления, планировщик
+frontend/         # React + Vite
+alembic/          # миграции
+tests/            # автоматические проверки
+.github/workflows/# CI и запуск синхронизации
+```
+
+## Автор
+
+[Pybackendev](https://github.com/Pybackendev) · [Связаться на Freelancehunt](https://freelancehunt.com/freelancer/Pybackendev.html)
+
+
