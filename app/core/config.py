@@ -8,6 +8,8 @@ class Settings(BaseSettings):
     freelancehunt_token: str
     freelancehunt_skill_ids: str = "22,180"
     telegram_bot_token: str = ""
+    telegram_bot_username: str = ""
+    telegram_webhook_secret: str = ""
     telegram_chat_id: str = ""
     sync_interval_minutes: int = 15
     sync_trigger_token: str = ""  # shared secret for POST /internal/sync on free plan

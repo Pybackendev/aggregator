@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import Sidebar from "./components/Sidebar.jsx";
 import Toolbar from "./components/Toolbar.jsx";
@@ -6,8 +6,7 @@ import JobList from "./components/JobList.jsx";
 import FilterForm from "./components/FilterForm.jsx";
 import UserBadge from "./components/UserBadge.jsx";
 
-const USER_ID_KEY = "aggregator_user_id";
-const CHAT_ID_KEY = "aggregator_chat_id";
+const SESSION_KEY = "aggregator_telegram_session";
 const FAVORITES_KEY = "aggregator_favorites";
 const PAGE_SIZE = 20;
 
@@ -23,79 +22,173 @@ function loadFavorites() {
 export default function App() {
   const [section, setSection] = useState("jobs");
   const [jobs, setJobs] = useState([]);
-  const [offset, setOffset] = useState(0);
   const [hasMore, setHasMore] = useState(true);
   const [filters, setFilters] = useState([]);
-  const [chatIdInput, setChatIdInput] = useState("");
-  const [userId, setUserId] = useState(() => localStorage.getItem(USER_ID_KEY) || null);
-  const [chatId, setChatId] = useState(() => localStorage.getItem(CHAT_ID_KEY) || null);
+  const [token, setToken] = useState(() => localStorage.getItem(SESSION_KEY));
+  const [user, setUser] = useState(null);
+  const [telegramUrl, setTelegramUrl] = useState(null);
+  const [telegramBusy, setTelegramBusy] = useState(false);
+  const [telegramError, setTelegramError] = useState(null);
   const [error, setError] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [favorites, setFavorites] = useState(loadFavorites);
   const [search, setSearch] = useState("");
   const [sort, setSort] = useState("newest");
+  const [currency, setCurrency] = useState("");
+  const [currencies, setCurrencies] = useState([]);
+  const [currencyError, setCurrencyError] = useState(false);
+  const jobsRequest = useRef(null);
+  const query = search.trim();
+  const favoriteIds = section === "favorites" ? [...favorites].join(",") : null;
+  const yesterday = Date.now() - 86_400_000;
+  const todayCount = jobs.filter((job) => Date.parse(job.published_at) >= yesterday).length;
 
-  useEffect(() => {
-    loadJobs(0, false);
+  const clearTelegram = useCallback(() => {
+    localStorage.removeItem(SESSION_KEY);
+    setToken(null);
+    setUser(null);
+    setTelegramUrl(null);
+    setFilters([]);
   }, []);
 
-  useEffect(() => {
-    if (userId) loadFilters();
-  }, [userId]);
+  const reportTelegramError = useCallback((error) => {
+    if (error.status === 401) clearTelegram();
+    setTelegramError(error.message);
+  }, [clearTelegram]);
 
-  async function loadJobs(nextOffset, append) {
-    append ? setLoadingMore(true) : setLoading(true);
+  useEffect(() => {
+    if (!token) return;
+    const controller = new AbortController();
+    let timer;
+    async function checkConnection() {
+      try {
+        const connected = await api.telegramSession(token, controller.signal);
+        if (controller.signal.aborted) return;
+        if (connected) {
+          localStorage.setItem(SESSION_KEY, token);
+          setUser(connected);
+          setTelegramUrl(null);
+          setTelegramError(null);
+        } else {
+          timer = setTimeout(checkConnection, 2000);
+        }
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        reportTelegramError(error);
+        if (error.status !== 401) timer = setTimeout(checkConnection, 5000);
+      }
+    }
+    checkConnection();
+    return () => { controller.abort(); clearTimeout(timer); };
+  }, [token, reportTelegramError]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    api.listCurrencies({ signal: controller.signal }).then(setCurrencies).catch(() => {
+      if (!controller.signal.aborted) setCurrencyError(true);
+    });
+    return () => controller.abort();
+  }, []);
+
+  const loadFilters = useCallback(async (signal) => {
+    if (!user) return;
+    try {
+      const items = await api.listFilters(user.id, token, signal);
+      if (!signal?.aborted) setFilters(items);
+    } catch (error) {
+      if (!signal?.aborted) reportTelegramError(error);
+    }
+  }, [user, token, reportTelegramError]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    loadFilters(controller.signal);
+    return () => controller.abort();
+  }, [loadFilters]);
+
+  const loadJobs = useCallback(async (offset, signal) => {
+    const append = offset > 0;
+    if (append) setLoadingMore(true);
     setError(null);
     try {
-      const page = await api.listJobs({ limit: PAGE_SIZE, offset: nextOffset });
-      setJobs((prev) => (append ? [...prev, ...page] : page));
-      setOffset(nextOffset + page.length);
-      setHasMore(page.length === PAGE_SIZE);
+      const params = new URLSearchParams({ limit: PAGE_SIZE + 1, offset, q: query, sort });
+      if (currency) params.set("currency", currency);
+      if (favoriteIds) {
+        for (const id of favoriteIds.split(",")) params.append("ids", id);
+      }
+      const page = favoriteIds === "" ? [] : await api.listJobs(params, { signal });
+      if (signal.aborted) return;
+      const items = page.slice(0, PAGE_SIZE);
+      setJobs((prev) => (append ? [...prev, ...items] : items));
+      setHasMore(page.length > PAGE_SIZE);
     } catch (e) {
-      setError(e.message);
+      if (!signal.aborted) setError(e.message);
     } finally {
-      append ? setLoadingMore(false) : setLoading(false);
+      if (!signal.aborted) {
+        append ? setLoadingMore(false) : setLoading(false);
+      }
+    }
+  }, [currency, favoriteIds, query, sort]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    jobsRequest.current = controller;
+    setLoading(true);
+    setLoadingMore(false);
+    setJobs([]);
+    setHasMore(false);
+    const timer = setTimeout(() => loadJobs(0, controller.signal), 250);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [loadJobs]);
+
+  async function handleConnect() {
+    setTelegramBusy(true);
+    setTelegramError(null);
+    try {
+      const link = await api.connectTelegram();
+      setToken(link.token);
+      setTelegramUrl(link.url);
+    } catch (error) {
+      reportTelegramError(error);
+    } finally {
+      setTelegramBusy(false);
     }
   }
 
-  async function loadFilters() {
+  async function handleLogout() {
+    setTelegramBusy(true);
+    setTelegramError(null);
     try {
-      setFilters(await api.listFilters(userId));
-    } catch (e) {
-      setError(e.message);
-    }
-  }
-
-  async function handleRegister(e) {
-    e.preventDefault();
-    if (!chatIdInput.trim()) return;
-    try {
-      const user = await api.createUser(chatIdInput.trim());
-      localStorage.setItem(USER_ID_KEY, String(user.id));
-      localStorage.setItem(CHAT_ID_KEY, user.telegram_chat_id);
-      setUserId(user.id);
-      setChatId(user.telegram_chat_id);
-    } catch (e) {
-      setError(e.message);
+      await api.logout(token);
+      clearTelegram();
+    } catch (error) {
+      reportTelegramError(error);
+    } finally {
+      setTelegramBusy(false);
     }
   }
 
   async function handleAddFilter(filter) {
     try {
-      await api.addFilter(userId, filter);
-      loadFilters();
-    } catch (e) {
-      setError(e.message);
+      const item = await api.addFilter(user.id, token, filter);
+      setFilters((items) => [...items, item]);
+    } catch (error) {
+      reportTelegramError(error);
+      return false;
     }
+    return true;
   }
 
   async function handleDeleteFilter(filterId) {
     try {
-      await api.deleteFilter(userId, filterId);
-      loadFilters();
-    } catch (e) {
-      setError(e.message);
+      await api.deleteFilter(user.id, token, filterId);
+      setFilters((items) => items.filter((item) => item.id !== filterId));
+    } catch (error) {
+      reportTelegramError(error);
     }
   }
 
@@ -109,37 +202,12 @@ export default function App() {
     });
   }
 
-  const visibleJobs = useMemo(() => {
-    let list = jobs;
-    if (section === "favorites") {
-      list = list.filter((j) => favorites.has(j.id));
-    }
-    if (search.trim()) {
-      const q = search.trim().toLowerCase();
-      list = list.filter((j) => j.title.toLowerCase().includes(q));
-    }
-    list = [...list].sort((a, b) => {
-      if (sort === "budget") {
-        return (b.budget_amount || 0) - (a.budget_amount || 0);
-      }
-      return new Date(b.published_at || 0) - new Date(a.published_at || 0);
-    });
-    return list;
-  }, [jobs, section, favorites, search, sort]);
-
-  const todayCount = useMemo(() => {
-    const now = Date.now();
-    const dayMs = 24 * 60 * 60 * 1000;
-    return jobs.filter((j) => j.published_at && now - new Date(j.published_at).getTime() < dayMs)
-      .length;
-  }, [jobs]);
-
   return (
     <div className="app-layout">
       <Sidebar
         active={section}
         onChange={setSection}
-        jobsCount={jobs.length}
+        jobsCount={section === "jobs" ? jobs.length : undefined}
         favoritesCount={favorites.size}
       />
 
@@ -155,7 +223,7 @@ export default function App() {
                 </h1>
                 <p className="subtitle">Проекты с Freelancehunt по Python и разработке ботов</p>
               </div>
-              <UserBadge chatId={chatId} onClick={() => setSection("filters")} />
+              <UserBadge chatId={user?.telegram_chat_id} onClick={() => setSection("filters")} />
             </div>
           </header>
 
@@ -168,18 +236,22 @@ export default function App() {
                 onSearchChange={setSearch}
                 sort={sort}
                 onSortChange={setSort}
-                count={visibleJobs.length}
+                currency={currency}
+                currencies={currencies}
+                onCurrencyChange={setCurrency}
+                count={jobs.length}
                 todayCount={section === "jobs" ? todayCount : 0}
               />
+              {currencyError && <p role="status">Валюты не загрузились. Обновите страницу, чтобы повторить.</p>}
               {loading ? (
                 <div className="empty">Загрузка…</div>
               ) : (
-                <JobList jobs={visibleJobs} favorites={favorites} onToggleFavorite={toggleFavorite} />
+                <JobList jobs={jobs} favorites={favorites} onToggleFavorite={toggleFavorite} />
               )}
 
-              {section === "jobs" && !loading && hasMore && (
+              {!loading && hasMore && (
                 <div style={{ textAlign: "center", marginTop: 16 }}>
-                  <button className="secondary" onClick={() => loadJobs(offset, true)} disabled={loadingMore}>
+                  <button className="secondary" onClick={() => loadJobs(jobs.length, jobsRequest.current.signal)} disabled={loadingMore}>
                     {loadingMore ? "Загрузка…" : "Показать ещё"}
                   </button>
                 </div>
@@ -187,19 +259,31 @@ export default function App() {
             </>
           )}
 
-          {section === "filters" &&
-            (userId ? (
-              <FilterForm filters={filters} onAdd={handleAddFilter} onDelete={handleDeleteFilter} />
-            ) : (
-              <form className="filter-form" onSubmit={handleRegister}>
-                <input
-                  placeholder="Твой Telegram chat_id"
-                  value={chatIdInput}
-                  onChange={(e) => setChatIdInput(e.target.value)}
-                />
-                <button type="submit">Зарегистрироваться</button>
-              </form>
-            ))}
+          {section === "filters" && (
+            <>
+              {telegramError && <div className="error" role="alert">{telegramError}</div>}
+              {user ? (
+                <>
+                  <div className="card filter-row">
+                    <span role="status">Telegram подключён</span>
+                    <button className="secondary" type="button" onClick={handleLogout} disabled={telegramBusy}>Выйти</button>
+                  </div>
+                  <FilterForm filters={filters} onAdd={handleAddFilter} onDelete={handleDeleteFilter} />
+                </>
+              ) : telegramUrl ? (
+                <div className="card">
+                  <a className="job-link" href={telegramUrl} target="_blank" rel="noreferrer">Открыть бота в Telegram</a>
+                  <p role="status">Нажмите «Запустить» в боте и вернитесь сюда. Ссылка действует 10 минут.</p>
+                </div>
+              ) : token ? (
+                <p role="status">Проверяем подключение Telegram…</p>
+              ) : (
+                <button type="button" onClick={handleConnect} disabled={telegramBusy}>
+                  {telegramBusy ? "Готовим ссылку…" : "Подключить Telegram"}
+                </button>
+              )}
+            </>
+          )}
         </div>
       </main>
     </div>
