@@ -24,6 +24,10 @@ services:
         value: "22,180"
       - key: TELEGRAM_BOT_TOKEN
         sync: false
+      - key: TELEGRAM_BOT_USERNAME
+        sync: false
+      - key: TELEGRAM_WEBHOOK_SECRET
+        sync: false
       - key: TELEGRAM_CHAT_ID
         sync: false
       - key: SYNC_TRIGGER_TOKEN

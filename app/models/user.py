@@ -24,3 +24,12 @@ class JobFilter(Base):
     min_budget: Mapped[float | None] = mapped_column(Numeric(12, 2), nullable=True)
 
     user: Mapped["User"] = relationship(back_populates="filters", lazy="selectin")
+
+
+class TelegramSession(Base):
+    __tablename__ = "telegram_sessions"
+
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    code_hash: Mapped[str | None] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[int] = mapped_column(BigInteger, index=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))

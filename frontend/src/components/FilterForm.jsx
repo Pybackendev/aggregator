@@ -3,15 +3,19 @@ import { useState } from "react";
 export default function FilterForm({ filters, onAdd, onDelete }) {
   const [keyword, setKeyword] = useState("");
   const [minBudget, setMinBudget] = useState("");
+  const [saving, setSaving] = useState(false);
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
-    onAdd({
-      keyword: keyword.trim() || null,
-      min_budget: minBudget ? Number(minBudget) : null,
-    });
-    setKeyword("");
-    setMinBudget("");
+    setSaving(true);
+    try {
+      if (await onAdd({ keyword: keyword.trim() || null, min_budget: minBudget ? Number(minBudget) : null })) {
+        setKeyword("");
+        setMinBudget("");
+      }
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
@@ -28,7 +32,7 @@ export default function FilterForm({ filters, onAdd, onDelete }) {
           value={minBudget}
           onChange={(e) => setMinBudget(e.target.value)}
         />
-        <button type="submit">+ Добавить</button>
+        <button type="submit" disabled={saving}>+ Добавить</button>
       </form>
 
       <div className="section-title">Активные фильтры</div>

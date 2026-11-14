@@ -7,28 +7,43 @@ async function request(path, options = {}) {
   });
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`${res.status} ${res.statusText}: ${body}`);
+    let message = `${res.status} ${res.statusText}`;
+    try {
+      const { detail } = JSON.parse(body);
+      if (typeof detail === "string") message = detail;
+    } catch {
+      // Some hosting errors return HTML instead of an API error.
+    }
+    const error = new Error(message);
+    error.status = res.status;
+    throw error;
   }
   if (res.status === 204) return null;
   return res.json();
 }
 
+function authorized(token, options = {}) {
+  return {
+    ...options,
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+  };
+}
+
 export const api = {
-  listJobs: (params = {}) => {
+  listJobs: (params = {}, options) => {
     const qs = new URLSearchParams(params).toString();
-    return request(`/jobs${qs ? `?${qs}` : ""}`);
+    return request(`/jobs${qs ? `?${qs}` : ""}`, options);
   },
-  createUser: (telegramChatId) =>
-    request("/users", {
-      method: "POST",
-      body: JSON.stringify({ telegram_chat_id: telegramChatId }),
-    }),
-  listFilters: (userId) => request(`/users/${userId}/filters`),
-  addFilter: (userId, filter) =>
-    request(`/users/${userId}/filters`, {
+  listCurrencies: (options) => request("/jobs/currencies", options),
+  connectTelegram: () => request("/users/telegram/connect", { method: "POST" }),
+  telegramSession: (token, signal) => request("/users/telegram/session", authorized(token, { signal })),
+  logout: (token) => request("/users/telegram/session", authorized(token, { method: "DELETE" })),
+  listFilters: (userId, token, signal) => request(`/users/${userId}/filters`, authorized(token, { signal })),
+  addFilter: (userId, token, filter) =>
+    request(`/users/${userId}/filters`, authorized(token, {
       method: "POST",
       body: JSON.stringify(filter),
-    }),
-  deleteFilter: (userId, filterId) =>
-    request(`/users/${userId}/filters/${filterId}`, { method: "DELETE" }),
+    })),
+  deleteFilter: (userId, token, filterId) =>
+    request(`/users/${userId}/filters/${filterId}`, authorized(token, { method: "DELETE" })),
 };

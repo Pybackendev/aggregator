@@ -1,10 +1,6 @@
 from pydantic import BaseModel, ConfigDict
 
 
-class UserCreate(BaseModel):
-    telegram_chat_id: str
-
-
 class UserOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: int
