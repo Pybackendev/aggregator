@@ -16,6 +16,7 @@ class JobListingOut(BaseModel):
     description: str | None
     budget_amount: float | None
     budget_currency: str | None
+    status_id: int | None
     status_name: str | None
     url: str | None
     published_at: datetime | None

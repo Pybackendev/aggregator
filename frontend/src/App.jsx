@@ -5,10 +5,15 @@ import Toolbar from "./components/Toolbar.jsx";
 import JobList from "./components/JobList.jsx";
 import FilterForm from "./components/FilterForm.jsx";
 import UserBadge from "./components/UserBadge.jsx";
+import { dateLabel } from "./utils/format";
 
 const SESSION_KEY = "aggregator_telegram_session";
 const FAVORITES_KEY = "aggregator_favorites";
+const THEME_KEY = "aggregator_theme";
 const PAGE_SIZE = 20;
+const DAY = 86_400_000;
+const JOB_CRITERIA = { status: "open", skill: "", period: "", budget: "" };
+const FAVORITE_CRITERIA = { ...JOB_CRITERIA, status: "" };
 
 function loadFavorites() {
   try {
@@ -37,11 +42,15 @@ export default function App() {
   const [sort, setSort] = useState("newest");
   const [currency, setCurrency] = useState("");
   const [currencies, setCurrencies] = useState([]);
-  const [currencyError, setCurrencyError] = useState(false);
+  const [skills, setSkills] = useState([]);
+  const [criteria, setCriteria] = useState(JOB_CRITERIA);
+  const [lastSync, setLastSync] = useState(undefined);
+  const [metadataError, setMetadataError] = useState(false);
+  const [theme, setTheme] = useState(() => document.documentElement.dataset.theme === "light" ? "light" : "dark");
   const jobsRequest = useRef(null);
   const query = search.trim();
   const favoriteIds = section === "favorites" ? [...favorites].join(",") : null;
-  const yesterday = Date.now() - 86_400_000;
+  const yesterday = Date.now() - DAY;
   const todayCount = jobs.filter((job) => Date.parse(job.published_at) >= yesterday).length;
 
   const clearTelegram = useCallback(() => {
@@ -85,8 +94,12 @@ export default function App() {
 
   useEffect(() => {
     const controller = new AbortController();
-    api.listCurrencies({ signal: controller.signal }).then(setCurrencies).catch(() => {
-      if (!controller.signal.aborted) setCurrencyError(true);
+    const options = { signal: controller.signal };
+    const fail = () => { if (!controller.signal.aborted) setMetadataError(true); };
+    api.listCurrencies(options).then(setCurrencies).catch(fail);
+    api.listSkills(options).then(setSkills).catch(fail);
+    api.syncStatus(options).then(({ last_success_at }) => setLastSync(last_success_at)).catch(() => {
+      if (!controller.signal.aborted) setLastSync(null);
     });
     return () => controller.abort();
   }, []);
@@ -114,6 +127,11 @@ export default function App() {
     try {
       const params = new URLSearchParams({ limit: PAGE_SIZE + 1, offset, q: query, sort });
       if (currency) params.set("currency", currency);
+      if (criteria.status) params.set("status", criteria.status);
+      if (criteria.skill) params.set("skill_id", criteria.skill);
+      if (criteria.period) params.set("posted_since", new Date(Date.now() - Number(criteria.period) * DAY).toISOString());
+      const budget = Number(criteria.budget);
+      if (currency && criteria.budget && budget >= 0 && budget <= 9_999_999_999.99) params.set("min_budget", criteria.budget);
       if (favoriteIds) {
         for (const id of favoriteIds.split(",")) params.append("ids", id);
       }
@@ -129,7 +147,7 @@ export default function App() {
         append ? setLoadingMore(false) : setLoading(false);
       }
     }
-  }, [currency, favoriteIds, query, sort]);
+  }, [criteria, currency, favoriteIds, query, sort]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -202,11 +220,37 @@ export default function App() {
     });
   }
 
+  function changeTheme() {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch { /* Theme still works for this visit. */ }
+    setTheme(next);
+  }
+
+  function resetFilters(nextSection = section) {
+    setSearch("");
+    setSort("newest");
+    setCurrency("");
+    setCriteria(nextSection === "favorites" ? FAVORITE_CRITERIA : JOB_CRITERIA);
+  }
+
+  function changeSection(nextSection) {
+    if (nextSection === section) return;
+    resetFilters(nextSection);
+    setSection(nextSection);
+  }
+
+  function changeCurrency(value) {
+    setCurrency(value);
+    setCriteria((current) => ({ ...current, budget: "" }));
+    if (!value) setSort("newest");
+  }
+
   return (
     <div className="app-layout">
       <Sidebar
         active={section}
-        onChange={setSection}
+        onChange={changeSection}
         jobsCount={section === "jobs" ? jobs.length : undefined}
         favoritesCount={favorites.size}
       />
@@ -222,8 +266,14 @@ export default function App() {
                   {section === "filters" && "Мои фильтры"}
                 </h1>
                 <p className="subtitle">Проекты с Freelancehunt по Python и разработке ботов</p>
+                {section === "jobs" && lastSync !== undefined && (
+                  <p className="sync-time">{lastSync ? `Последнее обновление · ${dateLabel(lastSync)}` : "Время последнего обновления неизвестно"}</p>
+                )}
               </div>
-              <UserBadge chatId={user?.telegram_chat_id} onClick={() => setSection("filters")} />
+              <div className="header-actions">
+                <button type="button" className="secondary theme-toggle" onClick={changeTheme}>{theme === "dark" ? "Светлая тема" : "Тёмная тема"}</button>
+                <UserBadge chatId={user?.telegram_chat_id} onClick={() => changeSection("filters")} />
+              </div>
             </div>
           </header>
 
@@ -238,15 +288,20 @@ export default function App() {
                 onSortChange={setSort}
                 currency={currency}
                 currencies={currencies}
-                onCurrencyChange={setCurrency}
+                onCurrencyChange={changeCurrency}
+                criteria={criteria}
+                onCriteriaChange={(key, value) => setCriteria((current) => ({ ...current, [key]: value }))}
+                skills={skills}
+                onReset={() => resetFilters()}
                 count={jobs.length}
                 todayCount={section === "jobs" ? todayCount : 0}
               />
-              {currencyError && <p role="status">Валюты не загрузились. Обновите страницу, чтобы повторить.</p>}
+              {metadataError && <p role="status">Часть фильтров не загрузилась. Обновите страницу, чтобы повторить.</p>}
               {loading ? (
-                <div className="empty">Загрузка…</div>
+                <div className="empty" role="status">Загрузка…</div>
               ) : (
-                <JobList jobs={jobs} favorites={favorites} onToggleFavorite={toggleFavorite} />
+                <JobList jobs={jobs} favorites={favorites} onToggleFavorite={toggleFavorite}
+                  emptyText={error ? "Заказы недоступны. Обновите страницу, чтобы повторить." : favoriteIds === "" ? "Здесь появятся заказы, которые вы отметите звёздочкой." : "Ничего не найдено."} />
               )}
 
               {!loading && hasMore && (

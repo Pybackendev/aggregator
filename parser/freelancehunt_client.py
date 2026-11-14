@@ -43,6 +43,13 @@ class FreelancehuntClient:
         resp.raise_for_status()
         return resp.json()
 
+    async def get_project(self, project_id: int) -> dict | None:
+        response = await self._client.get(f"/projects/{project_id}")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        return response.json()["data"]
+
     async def iter_all_projects(self, skill_ids: list[int] | None = None, max_pages: int = 20):
         """Yield raw project dicts across pages until there's no `next` link or max_pages hit.
 
