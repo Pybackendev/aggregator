@@ -35,6 +35,8 @@ export const api = {
     return request(`/jobs${qs ? `?${qs}` : ""}`, options);
   },
   listCurrencies: (options) => request("/jobs/currencies", options),
+  listSkills: (options) => request("/jobs/skills", options),
+  syncStatus: (options) => request("/jobs/sync-status", options),
   connectTelegram: () => request("/users/telegram/connect", { method: "POST" }),
   telegramSession: (token, signal) => request("/users/telegram/session", authorized(token, { signal })),
   logout: (token) => request("/users/telegram/session", authorized(token, { method: "DELETE" })),

@@ -1,8 +1,10 @@
+from datetime import datetime, timedelta, timezone
+
 import pytest
 from sqlalchemy import func, select
 
 from app.models.job import JobListing
-from parser.sync import upsert_job_from_raw
+from parser.sync import refresh_stored_projects, upsert_job_from_raw
 
 pytestmark = pytest.mark.asyncio
 
@@ -16,7 +18,10 @@ def make_raw(project_id=1655335, name="Write a Telegram bot", amount=100, skills
             "budget": {"amount": amount, "currency": "USD"},
             "status": {"id": 11, "name": "Open"},
             "employer": {"id": 999},
-            "self": {"api": "https://api.freelancehunt.com/v2/projects/x", "web": "https://freelancehunt.com/project/x.html"},
+            "self": {
+                "api": "https://api.freelancehunt.com/v2/projects/x",
+                "web": "https://freelancehunt.com/project/x.html",
+            },
             "published_at": "2026-09-25T16:32:25+03:00",
             "skills": skills or [{"id": 22, "name": "Python"}],
         },
@@ -60,3 +65,38 @@ async def test_reprocessing_updates_changed_fields(db_session):
 
     assert is_new is False
     assert job.budget_amount == 250
+
+
+async def test_reads_public_link_and_preserves_it_when_source_omits_it(db_session):
+    raw = make_raw()
+    raw["attributes"].pop("self")
+    url = "https://freelancehunt.com/project/telegram-bot/1655335.html"
+    raw["links"] = {
+        "self": {"api": "https://api.freelancehunt.com/v2/projects/1655335", "web": url}
+    }
+    job, _ = await upsert_job_from_raw(db_session, raw)
+    assert job.url == url
+    await db_session.commit()
+    raw["links"]["self"]["web"] = "https://freelancehunt.com.example.org/project/fake/1655335.html"
+    job, _ = await upsert_job_from_raw(db_session, raw)
+    assert job.url == url
+
+
+async def test_refresh_checks_details_for_stored_projects_missing_from_feed(db_session):
+    started_at = datetime.now(timezone.utc)
+    project, _ = await upsert_job_from_raw(db_session, make_raw())
+    removed, _ = await upsert_job_from_raw(db_session, make_raw(project_id=2))
+    project.fetched_at = removed.fetched_at = started_at - timedelta(hours=2)
+    await db_session.commit()
+
+    class Source:
+        async def get_project(self, project_id):
+            if project_id == 2:
+                return None
+            raw = make_raw(project_id=project_id)
+            raw["attributes"]["status"] = {"id": 21, "name": "Closed"}
+            return raw
+
+    await refresh_stored_projects(db_session, Source(), started_at)
+    assert project.status_id == 21
+    assert removed.status_id == 0

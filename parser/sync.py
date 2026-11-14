@@ -10,7 +10,8 @@ NOTE: attribute names (budget.amount, status.name, employer.id, skills, ...)
 are placeholders — verify against a real API response before relying on this.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
+from urllib.parse import urlsplit
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,7 +19,7 @@ from sqlalchemy.orm import selectinload
 
 from app.core.config import settings
 from app.core.db import async_session
-from app.models.job import JobListing, Skill
+from app.models.job import FeedSync, JobListing, OPEN_STATUS, Skill, UNAVAILABLE_STATUS
 from app.models.user import JobFilter
 from app.services.matching import matching_chat_ids
 from parser.freelancehunt_client import FreelancehuntClient
@@ -57,15 +58,36 @@ async def upsert_job_from_raw(session: AsyncSession, raw: dict) -> tuple[JobList
     job.status_name = status.get("name")
     employer = attrs.get("employer") or {}
     job.employer_id = employer.get("id")
-    self_links = attrs.get("self") or {}
-    if isinstance(self_links, dict):
-        job.url = self_links.get("web") or self_links.get("api")
+    for source in ((raw.get("links") or {}).get("self"), attrs.get("self"), job.url):
+        url = source.get("web") if isinstance(source, dict) else source
+        if isinstance(url, str):
+            try:
+                parsed = urlsplit(url)
+            except ValueError:
+                continue
+            if (
+                parsed.scheme == "https"
+                and parsed.netloc in {"freelancehunt.com", "www.freelancehunt.com"}
+                and parsed.path.startswith(
+                    (
+                        "/project/",
+                        "/en/project/",
+                        "/ua/project/",
+                        "/uk/project/",
+                        "/pl/project/",
+                        "/ru/project/",
+                    )
+                )
+                and len(url) <= 500
+            ):
+                job.url = url
+                break
     else:
-        job.url = self_links or raw.get("links", {}).get("self")
+        job.url = None
     published_at = attrs.get("published_at")
     if published_at:
         job.published_at = datetime.fromisoformat(published_at)
-    job.fetched_at = datetime.utcnow()
+    job.fetched_at = datetime.now(timezone.utc)
 
     skill_objs = []
     for s in attrs.get("skills", []) or []:
@@ -78,6 +100,35 @@ async def upsert_job_from_raw(session: AsyncSession, raw: dict) -> tuple[JobList
     return job, is_new
 
 
+async def refresh_stored_projects(
+    session: AsyncSession,
+    client: FreelancehuntClient,
+    started_at: datetime,
+) -> None:
+    # Bound detail requests so one import cannot spend its entire API quota on the archive.
+    rows = await session.scalars(
+        select(JobListing)
+        .where(
+            JobListing.fetched_at < started_at - timedelta(hours=1),
+            JobListing.status_id.is_distinct_from(UNAVAILABLE_STATUS),
+            (JobListing.status_id == OPEN_STATUS)
+            | JobListing.status_id.is_(None)
+            | JobListing.url.is_(None)
+            | JobListing.url.like("https://api.freelancehunt.com/%"),
+        )
+        .order_by(JobListing.fetched_at, JobListing.id)
+        .limit(10)
+    )
+    for job in rows:
+        raw = await client.get_project(job.id)
+        if raw is None:
+            job.status_id = UNAVAILABLE_STATUS
+            job.status_name = "Недоступен"
+            job.fetched_at = datetime.now(timezone.utc)
+        else:
+            await upsert_job_from_raw(session, raw)
+
+
 async def sync_projects() -> int:
     """Returns number of new (previously unseen) job listings inserted.
     Also sends a Telegram notification to every user whose saved filter
@@ -85,14 +136,21 @@ async def sync_projects() -> int:
     client = FreelancehuntClient()
     new_count = 0
     new_jobs: list[JobListing] = []
+    started_at = datetime.now(timezone.utc)
     try:
         async with async_session() as session:
+            feed_sync = await session.get(FeedSync, 1, with_for_update=True)
+            if feed_sync is None:
+                feed_sync = FeedSync(id=1)
+                session.add(feed_sync)
             async for raw in client.iter_all_projects(skill_ids=settings.skill_ids_list):
                 job, is_new = await upsert_job_from_raw(session, raw)
                 if is_new:
                     new_count += 1
                     new_jobs.append(job)
 
+            await refresh_stored_projects(session, client, started_at)
+            feed_sync.completed_at = datetime.now(timezone.utc)
             await session.commit()
 
             if new_jobs:

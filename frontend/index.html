@@ -1,6 +1,11 @@
 <!doctype html>
 <html lang="ru">
   <head>
+    <script>
+      try {
+        if (localStorage.getItem("aggregator_theme") === "light") document.documentElement.dataset.theme = "light";
+      } catch {}
+    </script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Freelance Job Aggregator</title>

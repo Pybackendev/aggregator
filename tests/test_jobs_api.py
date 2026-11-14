@@ -1,15 +1,16 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 
 from app.api.jobs import router
 from app.core.db import get_session
-from app.models.job import JobListing, Skill
+from app.models.job import FeedSync, JobListing, Skill
 
 
 async def test_jobs_search_and_sort_before_pagination(db_session):
     skill = Skill(id=1, name="Python")
+    db_session.add(FeedSync(id=1, completed_at=datetime(2026, 1, 4, tzinfo=timezone.utc)))
     db_session.add_all(
         [
             JobListing(
@@ -54,15 +55,30 @@ async def test_jobs_search_and_sort_before_pagination(db_session):
         assert await ids(q="python", skill_id=1) == [1]
         db_session.add_all(
             [
-                JobListing(id=6, title="Python EUR", budget_amount=700, budget_currency="EUR"),
+                JobListing(
+                    id=6,
+                    title="Python EUR",
+                    description="Integrate payment gateway",
+                    budget_amount=700,
+                    budget_currency="EUR",
+                    status_id=11,
+                ),
                 JobListing(id=7, title="Python UAH", budget_amount=9000, budget_currency="UAH"),
             ]
         )
         await db_session.commit()
         assert await ids(q="python", currency="EUR", sort="budget", limit=1) == [6]
         assert await ids(q="python", currency="USD") == []
+        assert await ids(q="payment gateway", status="open") == [6]
+        assert await ids(posted_since="2026-01-04T00:00:00Z") == [4]
+        assert await ids(status="open", currency="EUR", min_budget=700) == [6]
+        assert await ids(status="open", currency="EUR", min_budget=701) == []
         response = await client.get("/jobs/currencies")
         assert response.json() == ["EUR", "UAH"]
+        assert (await client.get("/jobs/skills")).json() == [{"id": 1, "name": "Python"}]
+        assert (await client.get("/jobs/sync-status")).json() == {
+            "last_success_at": "2026-01-04T00:00:00Z"
+        }
         assert await ids(q="python", sort="budget", ids=[1, 4, 5], limit=1, offset=1) == [5]
         assert await ids(q="100%") == [5]
         assert await ids(q="does not match") == []

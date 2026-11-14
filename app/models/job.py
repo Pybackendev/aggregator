@@ -5,6 +5,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.db import Base
 
+OPEN_STATUS = 11
+UNAVAILABLE_STATUS = 0
+
 job_listing_skills = Table(
     "job_listing_skills",
     Base.metadata,
@@ -42,3 +45,10 @@ class JobListing(Base):
     skills: Mapped[list[Skill]] = relationship(
         secondary=job_listing_skills, back_populates="jobs", lazy="selectin"
     )
+
+
+class FeedSync(Base):
+    __tablename__ = "feed_sync"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

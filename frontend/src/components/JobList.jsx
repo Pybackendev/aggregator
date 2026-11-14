@@ -1,33 +1,34 @@
 import { colorForSkill } from "../utils/colors";
+import { budgetLabel, dateLabel } from "../utils/format";
 
-export default function JobList({ jobs, favorites, onToggleFavorite }) {
+export default function JobList({ jobs, favorites, onToggleFavorite, emptyText }) {
   if (jobs.length === 0) {
-    return <div className="empty">Ничего не найдено.</div>;
+    return <div className="empty" role="status">{emptyText}</div>;
   }
 
   return (
     <div>
       {jobs.map((job) => {
         const isFav = favorites.has(job.id);
+        const published = dateLabel(job.published_at);
         return (
-          <div className="card" key={job.id}>
+          <article className="card" key={job.id}>
             <div className="card-top">
-              <h3>{job.title}</h3>
+              <h2>{job.url ? <a className="job-title" href={job.url} target="_blank" rel="noreferrer">{job.title}</a> : job.title}</h2>
               <button
                 className={`star-btn ${isFav ? "active" : ""}`}
                 onClick={() => onToggleFavorite(job.id)}
                 title={isFav ? "Убрать из избранного" : "В избранное"}
+                aria-label={`Избранное: ${job.title}`}
+                aria-pressed={isFav}
               >
                 {isFav ? "★" : "☆"}
               </button>
             </div>
             <div className="meta">
-              <span className="budget">
-                {job.budget_amount
-                  ? `${job.budget_amount} ${job.budget_currency || ""}`
-                  : "бюджет не указан"}
-              </span>
-              {job.status_name ? <span>· {job.status_name}</span> : null}
+              <span className="budget">{budgetLabel(job.budget_amount, job.budget_currency)}</span>
+              <span>{job.status_name || (job.status_id === 11 ? "Приём ставок" : "Статус неизвестен")}</span>
+              {published && <time dateTime={job.published_at}>{published}</time>}
             </div>
             <div>
               {job.skills?.map((s) => {
@@ -36,7 +37,7 @@ export default function JobList({ jobs, favorites, onToggleFavorite }) {
                   <span
                     className="badge"
                     key={s.id}
-                    style={{ background: color.bg, color: color.fg }}
+                    style={{ "--skill-bg": color.bg, "--skill-fg": color.fg }}
                   >
                     {s.name}
                   </span>
@@ -45,10 +46,16 @@ export default function JobList({ jobs, favorites, onToggleFavorite }) {
             </div>
             {job.url && (
               <a className="job-link" href={job.url} target="_blank" rel="noreferrer">
-                Открыть на Freelancehunt →
+                Открыть на Freelancehunt ↗
               </a>
             )}
-          </div>
+            {job.description && (
+              <details className="job-details">
+                <summary>Описание заказа</summary>
+                <p>{job.description}</p>
+              </details>
+            )}
+          </article>
         );
       })}
     </div>
